@@ -223,7 +223,9 @@ class SimpleBarcodeScanner extends StatelessWidget {
           barcodeAppBar: barcodeAppBar,
           delayMillis: delayMillis,
           scanFormat: scanFormat,
-          onScanned: (res) => Navigator.pop(context, res),
+          onScanned: (res) {
+            if (context.mounted) Navigator.pop(context, res);
+          },
           child: child,
         ),
       ),

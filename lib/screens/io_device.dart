@@ -12,7 +12,7 @@ import '../constant.dart';
 import '../flutter_barcode_scanner.dart';
 
 /// Barcode scanner for mobile and desktop devices
-class BarcodeScanner extends StatelessWidget {
+class BarcodeScanner extends StatefulWidget {
   final String lineColor;
   final String cancelButtonText;
   final bool isShowFlashIcon;
@@ -45,74 +45,98 @@ class BarcodeScanner extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
-    if (Platform.isWindows) {
-      ///Get Window barcode Scanner UI
-      return WindowBarcodeScanner(
-        lineColor: lineColor,
-        cancelButtonText: cancelButtonText,
-        isShowFlashIcon: isShowFlashIcon,
-        scanType: scanType,
-        onScanned: onScanned,
-        appBarTitle: appBarTitle,
-        centerTitle: centerTitle,
-        delayMillis: delayMillis,
-      );
-    } else {
-      /// Scan Android and ios barcode scanner with flutter_barcode_scanner
-      /// If onClose is not null then stream barcode otherwise scan barcode
-      /// Scan barcode for mobile devices
-      ScanMode scanMode;
-      switch (scanType) {
-        case ScanType.barcode:
-          scanMode = ScanMode.BARCODE;
-          break;
-        case ScanType.qr:
-          scanMode = ScanMode.QR;
-          break;
-        default:
-          scanMode = ScanMode.DEFAULT;
-          break;
-      }
-      onClose != null
-          ? _streamBarcodeForMobileAndTabDevices(scanMode)
-          : _scanBarcodeForMobileAndTabDevices(scanMode);
+  State<BarcodeScanner> createState() => _BarcodeScannerState();
+}
 
-      return const Scaffold(
-        body: Center(
-          child: CircularProgressIndicator(),
-        ),
-      );
+class _BarcodeScannerState extends State<BarcodeScanner> {
+  bool _hasStartedScan = false;
+
+  @override
+  void initState() {
+    super.initState();
+    if (!Platform.isWindows) {
+      _startMobileScan();
     }
   }
 
-  _scanBarcodeForMobileAndTabDevices(ScanMode scanMode) async {
+  void _startMobileScan() {
+    if (_hasStartedScan) {
+      return;
+    }
+    _hasStartedScan = true;
+
+    /// Scan Android and ios barcode scanner with flutter_barcode_scanner
+    /// If onClose is not null then stream barcode otherwise scan barcode
+    /// Scan barcode for mobile devices
+    ScanMode scanMode;
+    switch (widget.scanType) {
+      case ScanType.barcode:
+        scanMode = ScanMode.BARCODE;
+        break;
+      case ScanType.qr:
+        scanMode = ScanMode.QR;
+        break;
+      default:
+        scanMode = ScanMode.DEFAULT;
+        break;
+    }
+    widget.onClose != null
+        ? _streamBarcodeForMobileAndTabDevices(scanMode)
+        : _scanBarcodeForMobileAndTabDevices(scanMode);
+  }
+
+  void _scanBarcodeForMobileAndTabDevices(ScanMode scanMode) async {
     String barcode = await FlutterBarcodeScanner.scanBarcode(
-      lineColor,
-      cancelButtonText,
-      isShowFlashIcon,
+      widget.lineColor,
+      widget.cancelButtonText,
+      widget.isShowFlashIcon,
       scanMode,
-      delayMillis,
-      cameraFace.name.toUpperCase(),
-      scanFormat,
+      widget.delayMillis,
+      widget.cameraFace.name.toUpperCase(),
+      widget.scanFormat,
     );
-    onScanned(barcode);
+    widget.onScanned(barcode);
   }
 
   void _streamBarcodeForMobileAndTabDevices(ScanMode scanMode) {
     FlutterBarcodeScanner.getBarcodeStreamReceiver(
-      lineColor,
-      cancelButtonText,
-      isShowFlashIcon,
+      widget.lineColor,
+      widget.cancelButtonText,
+      widget.isShowFlashIcon,
       scanMode,
-      delayMillis,
-      cameraFace.name.toUpperCase(),
-      scanFormat,
+      widget.delayMillis,
+      widget.cameraFace.name.toUpperCase(),
+      widget.scanFormat,
     )?.listen((barcode) {
       if (barcode != null) {
-        barcode == kCancelValue ? onClose?.call() : onScanned(barcode);
+        barcode == kCancelValue
+            ? widget.onClose?.call()
+            : widget.onScanned(barcode);
       }
     });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (Platform.isWindows) {
+      ///Get Window barcode Scanner UI
+      return WindowBarcodeScanner(
+        lineColor: widget.lineColor,
+        cancelButtonText: widget.cancelButtonText,
+        isShowFlashIcon: widget.isShowFlashIcon,
+        scanType: widget.scanType,
+        onScanned: widget.onScanned,
+        appBarTitle: widget.appBarTitle,
+        centerTitle: widget.centerTitle,
+        delayMillis: widget.delayMillis,
+      );
+    }
+
+    return const Scaffold(
+      body: Center(
+        child: CircularProgressIndicator(),
+      ),
+    );
   }
 }
 
