@@ -21,6 +21,7 @@ import androidx.annotation.NonNull;
 
 import com.google.android.gms.vision.CameraSource;
 import com.google.android.gms.vision.Detector;
+import com.google.android.gms.vision.Frame;
 import com.google.android.gms.vision.barcode.Barcode;
 import com.google.android.gms.vision.barcode.BarcodeDetector;
 
@@ -85,8 +86,13 @@ public class FlutterBarcodeView implements PlatformView{
                 5); // Height of the line
         frameLayout.addView(scanLine, lineParams);
 
-        // Start scanning animation
-        startScanLineAnimation();
+        if (paramData.isShowOverlay()) {
+            // Start scanning animation
+            startScanLineAnimation();
+        } else {
+            scannerOverlay.setVisibility(View.GONE);
+            scanLine.setVisibility(View.GONE);
+        }
 
         methodChannel = new MethodChannel(messenger, "plugins.codingwithtashi/barcode_scanner_view_" + id);
         methodChannel.setMethodCallHandler(this::onMethodCall);
@@ -191,19 +197,16 @@ public class FlutterBarcodeView implements PlatformView{
                 final android.util.SparseArray<Barcode> barcodes = detections.getDetectedItems();
 
                 if (barcodes.size() > 0) {
-                    // Get the preview size from camera parameters
-                    Camera camera = getCamera();
-                    Camera.Parameters parameters = camera.getParameters();
-                    Camera.Size previewSize = parameters.getPreviewSize();
+                    Frame.Metadata frameMetadata = detections.getFrameMetadata();
+                    int rotation = frameMetadata.getRotation();
+                    boolean isRotated = rotation == Frame.ROTATION_90 || rotation == Frame.ROTATION_270;
+                    float frameWidth = isRotated ? frameMetadata.getHeight() : frameMetadata.getWidth();
+                    float frameHeight = isRotated ? frameMetadata.getWidth() : frameMetadata.getHeight();
+                    float scaleX = surfaceView.getWidth() / frameWidth;
+                    float scaleY = surfaceView.getHeight() / frameHeight;
 
-                    // Calculate scaling factors
-                    float scaleX = (float) surfaceView.getWidth() / previewSize.width;
-                    float scaleY = (float) surfaceView.getHeight() / previewSize.height;
-
-                    // Calculate scan area in normalized coordinates
                     int scanAreaLeft = (surfaceView.getWidth() - SCAN_AREA_WIDTH) / 2;
                     int scanAreaTop = (surfaceView.getHeight() - SCAN_AREA_HEIGHT) / 2;
-
                     RectF scanArea = new RectF(
                             scanAreaLeft,
                             scanAreaTop,
@@ -213,32 +216,14 @@ public class FlutterBarcodeView implements PlatformView{
 
                     for (int i = 0; i < barcodes.size(); i++) {
                         Barcode barcode = barcodes.valueAt(i);
+                        float centerX = barcode.getBoundingBox().exactCenterX() * scaleX;
+                        float centerY = barcode.getBoundingBox().exactCenterY() * scaleY;
 
-                        // Scale the barcode coordinates to match the preview view
-                        RectF scaledBarcodeRect = new RectF(
-                                barcode.getBoundingBox().left * scaleX,
-                                barcode.getBoundingBox().top * scaleY,
-                                barcode.getBoundingBox().right * scaleX,
-                                barcode.getBoundingBox().bottom * scaleY
-                        );
-
-                        // Check if the scaled barcode intersects with the scan area
-                        if (RectF.intersects(scanArea, scaledBarcodeRect)) {
-                            // Calculate overlap percentage
-                            RectF intersection = new RectF();
-                            intersection.setIntersect(scanArea, scaledBarcodeRect);
-                            float overlapArea = intersection.width() * intersection.height();
-                            float barcodeArea = scaledBarcodeRect.width() * scaledBarcodeRect.height();
-                            float overlapPercentage = (overlapArea / barcodeArea) * 100;
-                            System.out.println("Overlap percentage: " + overlapPercentage);
-                            // If more than 100% of the barcode is within the scan area
-                            if (overlapPercentage >= 100) {
-
-                                mainHandler.post(() ->
-                                        methodChannel.invokeMethod("onBarcodeDetected", barcode.rawValue)
-                                );
-                                return;
-                            }
+                        if (scanArea.contains(centerX, centerY)) {
+                            mainHandler.post(() ->
+                                    methodChannel.invokeMethod("onBarcodeDetected", barcode.rawValue)
+                            );
+                            return;
                         }
                     }
                 }

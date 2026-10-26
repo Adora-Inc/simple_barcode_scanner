@@ -164,6 +164,10 @@ class SimpleBarcodeScanner extends StatelessWidget {
   /// Callback function called when the scanner is closed.
   final VoidCallback? onClose;
 
+  /// Whether the native view draws its scan box, scan line and dimmed surround.
+  /// Set to false to draw your own overlay. Android only; iOS draws none.
+  final bool showOverlay;
+
   /// Creates a new SimpleBarcodeScanner widget.
   const SimpleBarcodeScanner(
       {this.scaleWidth,
@@ -179,6 +183,7 @@ class SimpleBarcodeScanner extends StatelessWidget {
       this.continuous = false,
       this.onClose,
       this.scanFormat = ScanFormat.ALL_FORMATS,
+      this.showOverlay = true,
       required this.onBarcodeViewCreated});
 
   /// Launches the barcode scanner interface and returns the scanned value.
@@ -309,6 +314,7 @@ class SimpleBarcodeScanner extends StatelessWidget {
       onClose: onClose,
       onBarcodeViewCreated: onBarcodeViewCreated,
       scanFormat: scanFormat,
+      showOverlay: showOverlay,
       child: child,
     );
   }
