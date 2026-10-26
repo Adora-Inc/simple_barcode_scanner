@@ -88,10 +88,6 @@ public class SwiftFlutterBarcodeScannerPlugin: NSObject, FlutterPlugin, ScanBarc
         registrar.addMethodCallDelegate(instance, channel: channel)
         let eventChannel=FlutterEventChannel(name: "flutter_barcode_scanner_receiver", binaryMessenger: registrar.messenger())
         eventChannel.setStreamHandler(instance)
-        registrar.register(
-            BarcodeScannerViewFactory(messenger: registrar.messenger()),
-            withId: "plugins.codingwithtashi/barcode_scanner_view"
-        )
     }
     
     /// Check for camera availability
