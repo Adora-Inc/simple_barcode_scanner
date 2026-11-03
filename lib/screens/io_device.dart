@@ -159,6 +159,7 @@ class BarcodeScannerView extends StatelessWidget {
   final bool continuous;
   final ScanFormat scanFormat;
   final bool showOverlay;
+  final void Function(String code, String message)? onError;
   const BarcodeScannerView(
       {super.key,
       this.scannerWidth,
@@ -172,6 +173,7 @@ class BarcodeScannerView extends StatelessWidget {
       this.onClose,
       this.scanFormat = ScanFormat.ALL_FORMATS,
       this.showOverlay = true,
+      this.onError,
       required this.onBarcodeViewCreated});
 
   @override
@@ -222,6 +224,12 @@ class BarcodeScannerView extends StatelessWidget {
     if (onScanned != null) {
       controller.setOnScanned(onScanned!);
     }
+    if (onError != null) {
+      controller.setOnError(onError!);
+    }
     onBarcodeViewCreated(controller);
+    // The handler is attached now, so the native side can start the camera
+    // without losing an early onError.
+    controller.startScanning();
   }
 }

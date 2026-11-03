@@ -168,6 +168,10 @@ class SimpleBarcodeScanner extends StatelessWidget {
   /// Set to false to draw your own overlay. Android only; iOS draws none.
   final bool showOverlay;
 
+  /// Called when the native scanner fails, with a code and a message.
+  /// Codes: PERMISSION_DENIED, CAMERA_UNAVAILABLE.
+  final void Function(String code, String message)? onError;
+
   /// Creates a new SimpleBarcodeScanner widget.
   const SimpleBarcodeScanner(
       {this.scaleWidth,
@@ -184,6 +188,7 @@ class SimpleBarcodeScanner extends StatelessWidget {
       this.onClose,
       this.scanFormat = ScanFormat.ALL_FORMATS,
       this.showOverlay = true,
+      this.onError,
       required this.onBarcodeViewCreated});
 
   /// Launches the barcode scanner interface and returns the scanned value.
@@ -315,6 +320,7 @@ class SimpleBarcodeScanner extends StatelessWidget {
       onBarcodeViewCreated: onBarcodeViewCreated,
       scanFormat: scanFormat,
       showOverlay: showOverlay,
+      onError: onError,
       child: child,
     );
   }

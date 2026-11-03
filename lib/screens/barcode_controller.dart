@@ -12,10 +12,15 @@ class BarcodeViewController {
 
   final MethodChannel _channel;
   Function(String)? _onScanned;
+  void Function(String code, String message)? _onError;
 
   void setOnScanned(Function(String) callback) {
     log("Setting onScanned callback");
     _onScanned = callback;
+  }
+
+  void setOnError(void Function(String code, String message) callback) {
+    _onError = callback;
   }
 
   Future<dynamic> _handleMethodCall(MethodCall call) async {
@@ -28,6 +33,12 @@ class BarcodeViewController {
         break;
       case 'onError':
         log('Barcode Scanner Error: ${call.arguments}');
+        final args = call.arguments;
+        if (args is Map) {
+          _onError?.call(args['code'] as String, args['message'] as String);
+        } else {
+          _onError?.call('UNKNOWN', '$args');
+        }
         break;
       default:
         log('Unhandled method: ${call.method}');
@@ -45,5 +56,10 @@ class BarcodeViewController {
 
   Future<void> resumeScanning() {
     return _channel.invokeMethod('resumeScanning');
+  }
+
+  /// Tells the native view to start the camera. Called once the handler is attached.
+  Future<void> startScanning() {
+    return _channel.invokeMethod('startScanning');
   }
 }

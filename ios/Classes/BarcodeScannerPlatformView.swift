@@ -25,8 +25,15 @@ class BarcodeScannerViewFactory: NSObject, FlutterPlatformViewFactory {
 }
 
 private class CameraPreviewView: UIView {
+    var onLayout: (() -> Void)?
+
     override class var layerClass: AnyClass {
         return AVCaptureVideoPreviewLayer.self
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        onLayout?()
     }
 
     var previewLayer: AVCaptureVideoPreviewLayer {
@@ -43,7 +50,10 @@ class BarcodeScannerPlatformView: NSObject, FlutterPlatformView, AVCaptureMetada
     private let delayMillis: Int
     private let usesFrontCamera: Bool
     private let metadataTypes: [AVMetadataObject.ObjectType]
+    private let scanAreaSize: CGSize?
+    private let metadataOutput = AVCaptureMetadataOutput()
     private var isDetecting = true
+    private var hasStarted = false
     private var lastDetectionTime: Date?
 
     init(frame: CGRect, viewId: Int64, args: [String: Any], messenger: FlutterBinaryMessenger) {
@@ -57,6 +67,12 @@ class BarcodeScannerPlatformView: NSObject, FlutterPlatformView, AVCaptureMetada
         isContinuous = args["continuous"] as? Bool ?? false
         delayMillis = args["delayMillis"] as? Int ?? 0
         usesFrontCamera = (args["cameraFace"] as? Int) == 1
+        // Dart sends logical px, which are points on iOS.
+        if let width = args["scannerWidth"] as? Int, let height = args["scannerHeight"] as? Int {
+            scanAreaSize = CGSize(width: width, height: height)
+        } else {
+            scanAreaSize = nil
+        }
         switch args["scanFormat"] as? String {
         case "ONLY_QR_CODE":
             metadataTypes = ONLY_QR_CODE
@@ -70,11 +86,34 @@ class BarcodeScannerPlatformView: NSObject, FlutterPlatformView, AVCaptureMetada
         channel.setMethodCallHandler { [weak self] call, result in
             self?.handle(call: call, result: result)
         }
-        configureSession()
+        previewView.onLayout = { [weak self] in
+            self?.updateRectOfInterest()
+        }
+        // The session starts on "startScanning", once Dart has attached its handler,
+        // so an early onError can't be lost.
     }
 
     func view() -> UIView {
         return previewView
+    }
+
+    private func start() {
+        guard !hasStarted else { return }
+        hasStarted = true
+        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        case .authorized:
+            configureSession()
+        case .notDetermined:
+            AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
+                if granted {
+                    self?.configureSession()
+                } else {
+                    self?.sendError(code: "PERMISSION_DENIED", message: "Camera permission denied")
+                }
+            }
+        default:
+            sendError(code: "PERMISSION_DENIED", message: "Camera permission denied")
+        }
     }
 
     private func configureSession() {
@@ -87,14 +126,14 @@ class BarcodeScannerPlatformView: NSObject, FlutterPlatformView, AVCaptureMetada
                 let input = try? AVCaptureDeviceInput(device: device),
                 self.captureSession.canAddInput(input)
             else {
-                self.sendError("Camera not available")
+                self.sendError(code: "CAMERA_UNAVAILABLE", message: "Camera not available")
                 return
             }
             self.captureSession.addInput(input)
 
-            let metadataOutput = AVCaptureMetadataOutput()
+            let metadataOutput = self.metadataOutput
             guard self.captureSession.canAddOutput(metadataOutput) else {
-                self.sendError("Unable to read barcodes from the camera")
+                self.sendError(code: "CAMERA_UNAVAILABLE", message: "Unable to read barcodes from the camera")
                 return
             }
             self.captureSession.addOutput(metadataOutput)
@@ -107,7 +146,30 @@ class BarcodeScannerPlatformView: NSObject, FlutterPlatformView, AVCaptureMetada
                 self.previewView.previewLayer.session = self.captureSession
             }
             self.captureSession.startRunning()
+            // The layer-to-metadata conversion is only valid once the session is running.
+            DispatchQueue.main.async {
+                self.updateRectOfInterest()
+            }
         }
+    }
+
+    /// Limits detection to the scan area (centred, scannerWidth x scannerHeight), or to the
+    /// visible preview when no size is given, so codes cropped off by aspect fill are ignored.
+    /// Matches Android, which only accepts codes whose centre is inside the scan area.
+    private func updateRectOfInterest() {
+        let layer = previewView.previewLayer
+        let bounds = layer.bounds
+        guard layer.session != nil, captureSession.isRunning, !bounds.isEmpty else { return }
+        var scanRect = bounds
+        if let size = scanAreaSize {
+            scanRect = CGRect(
+                x: bounds.midX - size.width / 2,
+                y: bounds.midY - size.height / 2,
+                width: size.width,
+                height: size.height
+            ).intersection(bounds)
+        }
+        metadataOutput.rectOfInterest = layer.metadataOutputRectConverted(fromLayerRect: scanRect)
     }
 
     func metadataOutput(
@@ -134,6 +196,9 @@ class BarcodeScannerPlatformView: NSObject, FlutterPlatformView, AVCaptureMetada
 
     private func handle(call: FlutterMethodCall, result: @escaping FlutterResult) {
         switch call.method {
+        case "startScanning":
+            start()
+            result(nil)
         case "pauseScanning":
             isDetecting = false
             result(nil)
@@ -164,9 +229,9 @@ class BarcodeScannerPlatformView: NSObject, FlutterPlatformView, AVCaptureMetada
         }
     }
 
-    private func sendError(_ message: String) {
+    private func sendError(code: String, message: String) {
         DispatchQueue.main.async { [weak self] in
-            self?.channel.invokeMethod("onError", arguments: message)
+            self?.channel.invokeMethod("onError", arguments: ["code": code, "message": message])
         }
     }
 

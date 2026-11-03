@@ -51,8 +51,9 @@ public class FlutterBarcodeView implements PlatformView{
 
     // Make scan area smaller than camera view
     /// 400, 200 for barcode
-    private static  int SCAN_AREA_WIDTH = 400;
-    private static  int SCAN_AREA_HEIGHT = 200;
+    /// Per-view, in physical px. Not static, so one view's size can't leak into the next.
+    private int SCAN_AREA_WIDTH = 400;
+    private int SCAN_AREA_HEIGHT = 200;
     private ParamData paramData;
 
     public FlutterBarcodeView(Context context, BinaryMessenger messenger, int id, Object creationParams) {
@@ -103,8 +104,10 @@ public class FlutterBarcodeView implements PlatformView{
     }
 
     private void setDefaultData() {
-        SCAN_AREA_WIDTH = paramData.getScannerWidth()!=null?paramData.getScannerWidth():SCAN_AREA_WIDTH;
-        SCAN_AREA_HEIGHT = paramData.getScannerHeight()!=null?paramData.getScannerHeight():SCAN_AREA_HEIGHT;
+        // Dart sends logical px (dp); everything here (overlay, detection filter) works in physical px.
+        float density = context.getResources().getDisplayMetrics().density;
+        SCAN_AREA_WIDTH = paramData.getScannerWidth()!=null?Math.round(paramData.getScannerWidth() * density):SCAN_AREA_WIDTH;
+        SCAN_AREA_HEIGHT = paramData.getScannerHeight()!=null?Math.round(paramData.getScannerHeight() * density):SCAN_AREA_HEIGHT;
     }
 
     private int getScreenWidth() {
@@ -314,6 +317,10 @@ public class FlutterBarcodeView implements PlatformView{
                 break;
             case "toggleFlash":
                 toggleFlash(result);
+                break;
+            case "startScanning":
+                // iOS waits for this before starting the camera; Android starts with the surface.
+                result.success(null);
                 break;
             default:
                 result.notImplemented();
