@@ -12,9 +12,8 @@ simple_barcode_scanner that let you scan barcode and qr code in mobile, web and 
   s.license          = { :file => '../LICENSE' }
   s.author           = { 'Kunchok Tashi' => 'tashi@kharagedition.com' }
   s.source           = { :path => '.' }
-  s.source_files = 'Classes/**/*.{swift,h,m}'
-  s.public_header_files = 'Classes/**/*.h'
-  s.resources = 'Assets/*.png'
+  s.source_files = 'simple_barcode_scanner/Sources/simple_barcode_scanner/**/*.swift'
+  s.resources = 'simple_barcode_scanner/Sources/simple_barcode_scanner/Resources/*.png'
   s.dependency 'Flutter'
 
   s.ios.deployment_target = '12.0'
