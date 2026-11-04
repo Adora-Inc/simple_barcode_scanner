@@ -86,6 +86,7 @@ class BarcodeScannerPlatformView: NSObject, FlutterPlatformView, AVCaptureMetada
             self?.handle(call: call, result: result)
         }
         previewView.onLayout = { [weak self] in
+            self?.updatePreviewOrientation()
             self?.updateRectOfInterest()
         }
         observeSession()
@@ -190,7 +191,40 @@ class BarcodeScannerPlatformView: NSObject, FlutterPlatformView, AVCaptureMetada
         }
         // The layer-to-metadata conversion is only valid once the session is running.
         DispatchQueue.main.async { [weak self] in
+            self?.updatePreviewOrientation()
             self?.updateRectOfInterest()
+        }
+    }
+
+    /// Keeps the video upright when the interface rotates (e.g. on iPad).
+    private func updatePreviewOrientation() {
+        guard #available(iOS 13.0, *) else { return }
+        guard
+            let connection = previewView.previewLayer.connection,
+            let orientation = previewView.window?.windowScene?.interfaceOrientation
+        else { return }
+        if #available(iOS 17.0, *) {
+            let angle: CGFloat
+            switch orientation {
+            case .landscapeRight: angle = 0
+            case .portraitUpsideDown: angle = 270
+            case .landscapeLeft: angle = 180
+            default: angle = 90
+            }
+            if connection.isVideoRotationAngleSupported(angle) {
+                connection.videoRotationAngle = angle
+            }
+        } else {
+            let videoOrientation: AVCaptureVideoOrientation
+            switch orientation {
+            case .landscapeRight: videoOrientation = .landscapeRight
+            case .portraitUpsideDown: videoOrientation = .portraitUpsideDown
+            case .landscapeLeft: videoOrientation = .landscapeLeft
+            default: videoOrientation = .portrait
+            }
+            if connection.isVideoOrientationSupported {
+                connection.videoOrientation = videoOrientation
+            }
         }
     }
 
