@@ -1,6 +1,8 @@
 package com.amolg.flutterbarcodescanner.widget;
 
+import android.Manifest;
 import android.content.Context;
+import android.content.pm.PackageManager;
 import android.hardware.Camera;
 import android.view.View;
 import android.util.Log;
@@ -18,6 +20,7 @@ import android.view.animation.TranslateAnimation;
 import android.widget.ImageView;
 import android.graphics.Color;
 import androidx.annotation.NonNull;
+import androidx.core.content.ContextCompat;
 
 import com.google.android.gms.vision.CameraSource;
 import com.google.android.gms.vision.Detector;
@@ -32,6 +35,7 @@ import io.flutter.plugin.platform.PlatformView;
 
 import java.io.IOException;
 import java.lang.reflect.Field;
+import java.util.HashMap;
 import java.util.Map;
 
 public class FlutterBarcodeView implements PlatformView{
@@ -47,6 +51,9 @@ public class FlutterBarcodeView implements PlatformView{
     private BarcodeDetector barcodeDetector;
     private boolean isDetecting = true;
     private boolean isFlashOn = false;
+    // The camera starts once both are true, so an early onError reaches Dart's handler.
+    private boolean isSurfaceReady = false;
+    private boolean isStartRequested = false;
     private final Handler mainHandler;
 
     // Make scan area smaller than camera view
@@ -249,11 +256,8 @@ public class FlutterBarcodeView implements PlatformView{
         surfaceView.getHolder().addCallback(new SurfaceHolder.Callback() {
             @Override
             public void surfaceCreated(SurfaceHolder holder) {
-                try {
-                    cameraSource.start(surfaceView.getHolder());
-                } catch (IOException e) {
-                    Log.e(TAG, "Error starting camera: " + e.getMessage());
-                }
+                isSurfaceReady = true;
+                startCameraIfReady();
             }
 
             @Override
@@ -261,9 +265,37 @@ public class FlutterBarcodeView implements PlatformView{
 
             @Override
             public void surfaceDestroyed(SurfaceHolder holder) {
-                cameraSource.stop();
+                isSurfaceReady = false;
+                if (cameraSource != null) {
+                    cameraSource.stop();
+                }
             }
         });
+    }
+
+    private void startCameraIfReady() {
+        if (!isSurfaceReady || !isStartRequested || cameraSource == null) return;
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA)
+                != PackageManager.PERMISSION_GRANTED) {
+            sendError("PERMISSION_DENIED", "Camera permission denied");
+            return;
+        }
+        try {
+            cameraSource.start(surfaceView.getHolder());
+        } catch (SecurityException e) {
+            Log.e(TAG, "Camera permission denied: " + e.getMessage());
+            sendError("PERMISSION_DENIED", "Camera permission denied");
+        } catch (IOException | RuntimeException e) {
+            Log.e(TAG, "Error starting camera: " + e.getMessage());
+            sendError("CAMERA_UNAVAILABLE", "Camera not available");
+        }
+    }
+
+    private void sendError(String code, String message) {
+        Map<String, String> args = new HashMap<>();
+        args.put("code", code);
+        args.put("message", message);
+        mainHandler.post(() -> methodChannel.invokeMethod("onError", args));
     }
 
     private Camera getCamera() {
@@ -319,7 +351,8 @@ public class FlutterBarcodeView implements PlatformView{
                 toggleFlash(result);
                 break;
             case "startScanning":
-                // iOS waits for this before starting the camera; Android starts with the surface.
+                isStartRequested = true;
+                startCameraIfReady();
                 result.success(null);
                 break;
             default:
