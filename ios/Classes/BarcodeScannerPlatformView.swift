@@ -51,7 +51,11 @@ class BarcodeScannerPlatformView: NSObject, FlutterPlatformView, AVCaptureMetada
     private let scanAreaSize: CGSize?
     private let metadataOutput = AVCaptureMetadataOutput()
     private var isDetecting = true
+    // Main thread only. Reset when starting fails, so startScanning can retry.
     private var hasStarted = false
+    // sessionQueue only.
+    private var device: AVCaptureDevice?
+    private var observers: [NSObjectProtocol] = []
 
     init(frame: CGRect, viewId: Int64, args: [String: Any], messenger: FlutterBinaryMessenger) {
         previewView = CameraPreviewView(frame: frame)
@@ -84,6 +88,7 @@ class BarcodeScannerPlatformView: NSObject, FlutterPlatformView, AVCaptureMetada
         previewView.onLayout = { [weak self] in
             self?.updateRectOfInterest()
         }
+        observeSession()
         // The session starts on "startScanning", once Dart has attached its handler,
         // so an early onError can't be lost.
     }
@@ -103,17 +108,48 @@ class BarcodeScannerPlatformView: NSObject, FlutterPlatformView, AVCaptureMetada
                 if granted {
                     self?.configureSession()
                 } else {
-                    self?.sendError(code: "PERMISSION_DENIED", message: "Camera permission denied")
+                    self?.failStart(code: "PERMISSION_DENIED", message: "Camera permission denied")
                 }
             }
         default:
-            sendError(code: "PERMISSION_DENIED", message: "Camera permission denied")
+            failStart(code: "PERMISSION_DENIED", message: "Camera permission denied")
         }
+    }
+
+    private func failStart(code: String, message: String) {
+        DispatchQueue.main.async { [weak self] in
+            self?.hasStarted = false
+            self?.sendError(code: code, message: message)
+        }
+    }
+
+    private func observeSession() {
+        let center = NotificationCenter.default
+        observers.append(center.addObserver(
+            forName: .AVCaptureSessionRuntimeError, object: captureSession, queue: .main
+        ) { [weak self] notification in
+            let error = notification.userInfo?[AVCaptureSessionErrorKey] as? AVError
+            self?.failStart(
+                code: "CAMERA_UNAVAILABLE",
+                message: error?.localizedDescription ?? "Camera stopped unexpectedly"
+            )
+        })
+        // AVFoundation resumes the session itself when the interruption ends.
+        observers.append(center.addObserver(
+            forName: .AVCaptureSessionWasInterrupted, object: captureSession, queue: .main
+        ) { [weak self] _ in
+            self?.sendError(code: "CAMERA_UNAVAILABLE", message: "Camera is in use by another app")
+        })
     }
 
     private func configureSession() {
         sessionQueue.async { [weak self] in
             guard let self = self else { return }
+            // Already configured (a retry after a runtime error): just run it again.
+            if !self.captureSession.inputs.isEmpty {
+                self.runSession()
+                return
+            }
             let position: AVCaptureDevice.Position = self.usesFrontCamera ? .front : .back
             guard
                 let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: position)
@@ -121,14 +157,15 @@ class BarcodeScannerPlatformView: NSObject, FlutterPlatformView, AVCaptureMetada
                 let input = try? AVCaptureDeviceInput(device: device),
                 self.captureSession.canAddInput(input)
             else {
-                self.sendError(code: "CAMERA_UNAVAILABLE", message: "Camera not available")
+                self.failStart(code: "CAMERA_UNAVAILABLE", message: "Camera not available")
                 return
             }
             self.captureSession.addInput(input)
+            self.device = device
 
             let metadataOutput = self.metadataOutput
             guard self.captureSession.canAddOutput(metadataOutput) else {
-                self.sendError(code: "CAMERA_UNAVAILABLE", message: "Unable to read barcodes from the camera")
+                self.failStart(code: "CAMERA_UNAVAILABLE", message: "Unable to read barcodes from the camera")
                 return
             }
             self.captureSession.addOutput(metadataOutput)
@@ -140,11 +177,20 @@ class BarcodeScannerPlatformView: NSObject, FlutterPlatformView, AVCaptureMetada
             DispatchQueue.main.async {
                 self.previewView.previewLayer.session = self.captureSession
             }
-            self.captureSession.startRunning()
-            // The layer-to-metadata conversion is only valid once the session is running.
-            DispatchQueue.main.async {
-                self.updateRectOfInterest()
-            }
+            self.runSession()
+        }
+    }
+
+    /// Call on sessionQueue.
+    private func runSession() {
+        captureSession.startRunning()
+        guard captureSession.isRunning else {
+            failStart(code: "CAMERA_UNAVAILABLE", message: "Camera failed to start")
+            return
+        }
+        // The layer-to-metadata conversion is only valid once the session is running.
+        DispatchQueue.main.async { [weak self] in
+            self?.updateRectOfInterest()
         }
     }
 
@@ -195,15 +241,21 @@ class BarcodeScannerPlatformView: NSObject, FlutterPlatformView, AVCaptureMetada
             isDetecting = true
             result(nil)
         case "toggleFlash":
-            result(toggleTorch())
+            // On sessionQueue so it waits for configureSession to add the camera.
+            sessionQueue.async { [weak self] in
+                let value = self?.toggleTorch()
+                    ?? FlutterError(code: "CAMERA_ERROR", message: "Torch not available", details: nil)
+                DispatchQueue.main.async { result(value) }
+            }
         default:
             result(FlutterMethodNotImplemented)
         }
     }
 
+    /// Call on sessionQueue.
     private func toggleTorch() -> Any {
         guard
-            let device = (captureSession.inputs.first as? AVCaptureDeviceInput)?.device,
+            let device = device,
             device.hasTorch
         else {
             return FlutterError(code: "CAMERA_ERROR", message: "Torch not available", details: nil)
@@ -226,6 +278,7 @@ class BarcodeScannerPlatformView: NSObject, FlutterPlatformView, AVCaptureMetada
 
     deinit {
         channel.setMethodCallHandler(nil)
+        observers.forEach { NotificationCenter.default.removeObserver($0) }
         let session = captureSession
         sessionQueue.async {
             if session.isRunning {
