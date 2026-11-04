@@ -220,7 +220,8 @@ class BarcodeScannerView extends StatelessWidget {
   // Callback method when platform view is created
 
   void _onPlatformViewCreated(int id) {
-    final controller = BarcodeViewController.data(id);
+    final controller = BarcodeViewController.data(id)
+      ..setScanOptions(continuous: continuous, delayMillis: delayMillis);
     if (onScanned != null) {
       controller.setOnScanned(onScanned!);
     }

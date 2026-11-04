@@ -194,7 +194,7 @@ public class FlutterBarcodeView implements PlatformView{
 
     private void setupBarcodeDetector() {
         barcodeDetector = new BarcodeDetector.Builder(context)
-                .setBarcodeFormats(Barcode.ALL_FORMATS)
+                .setBarcodeFormats(getBarcodeFormats())
                 .build();
 
         barcodeDetector.setProcessor(new Detector.Processor<Barcode>() {
@@ -215,14 +215,20 @@ public class FlutterBarcodeView implements PlatformView{
                     float scaleX = surfaceView.getWidth() / frameWidth;
                     float scaleY = surfaceView.getHeight() / frameHeight;
 
-                    int scanAreaLeft = (surfaceView.getWidth() - SCAN_AREA_WIDTH) / 2;
-                    int scanAreaTop = (surfaceView.getHeight() - SCAN_AREA_HEIGHT) / 2;
-                    RectF scanArea = new RectF(
-                            scanAreaLeft,
-                            scanAreaTop,
-                            scanAreaLeft + SCAN_AREA_WIDTH,
-                            scanAreaTop + SCAN_AREA_HEIGHT
-                    );
+                    RectF scanArea;
+                    if (hasCustomScanArea() || paramData.isShowOverlay()) {
+                        int scanAreaLeft = (surfaceView.getWidth() - SCAN_AREA_WIDTH) / 2;
+                        int scanAreaTop = (surfaceView.getHeight() - SCAN_AREA_HEIGHT) / 2;
+                        scanArea = new RectF(
+                                scanAreaLeft,
+                                scanAreaTop,
+                                scanAreaLeft + SCAN_AREA_WIDTH,
+                                scanAreaTop + SCAN_AREA_HEIGHT
+                        );
+                    } else {
+                        // No size and no drawn box: scan the whole preview, as iOS does.
+                        scanArea = new RectF(0, 0, surfaceView.getWidth(), surfaceView.getHeight());
+                    }
 
                     for (int i = 0; i < barcodes.size(); i++) {
                         Barcode barcode = barcodes.valueAt(i);
@@ -239,6 +245,23 @@ public class FlutterBarcodeView implements PlatformView{
                 }
             }
         });
+    }
+
+    private boolean hasCustomScanArea() {
+        return paramData.getScannerWidth() != null && paramData.getScannerHeight() != null;
+    }
+
+    /// Mirrors the iOS format lists in SwiftFlutterBarcodeScannerPlugin.
+    private int getBarcodeFormats() {
+        String scanFormat = paramData.getScanFormat();
+        if ("ONLY_QR_CODE".equals(scanFormat)) {
+            return Barcode.QR_CODE;
+        }
+        if ("ONLY_BARCODE".equals(scanFormat)) {
+            return Barcode.CODE_128 | Barcode.CODE_39 | Barcode.CODE_93 | Barcode.EAN_13
+                    | Barcode.EAN_8 | Barcode.ITF | Barcode.PDF417 | Barcode.UPC_A | Barcode.UPC_E;
+        }
+        return Barcode.ALL_FORMATS;
     }
 
     @Override

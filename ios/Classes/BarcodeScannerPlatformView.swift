@@ -46,15 +46,12 @@ class BarcodeScannerPlatformView: NSObject, FlutterPlatformView, AVCaptureMetada
     private let channel: FlutterMethodChannel
     private let captureSession = AVCaptureSession()
     private let sessionQueue = DispatchQueue(label: "simple_barcode_scanner.view.session")
-    private let isContinuous: Bool
-    private let delayMillis: Int
     private let usesFrontCamera: Bool
     private let metadataTypes: [AVMetadataObject.ObjectType]
     private let scanAreaSize: CGSize?
     private let metadataOutput = AVCaptureMetadataOutput()
     private var isDetecting = true
     private var hasStarted = false
-    private var lastDetectionTime: Date?
 
     init(frame: CGRect, viewId: Int64, args: [String: Any], messenger: FlutterBinaryMessenger) {
         previewView = CameraPreviewView(frame: frame)
@@ -64,8 +61,6 @@ class BarcodeScannerPlatformView: NSObject, FlutterPlatformView, AVCaptureMetada
             name: "plugins.codingwithtashi/barcode_scanner_view_\(viewId)",
             binaryMessenger: messenger
         )
-        isContinuous = args["continuous"] as? Bool ?? false
-        delayMillis = args["delayMillis"] as? Int ?? 0
         usesFrontCamera = (args["cameraFace"] as? Int) == 1
         // Dart sends logical px, which are points on iOS.
         if let width = args["scannerWidth"] as? Int, let height = args["scannerHeight"] as? Int {
@@ -79,7 +74,7 @@ class BarcodeScannerPlatformView: NSObject, FlutterPlatformView, AVCaptureMetada
         case "ONLY_BARCODE":
             metadataTypes = ONLY_BARCODE
         default:
-            metadataTypes = (args["scanType"] as? Int) == ScanMode.QR.index ? ONLY_QR_CODE : ALL_FORMATS
+            metadataTypes = ALL_FORMATS
         }
         super.init()
 
@@ -153,9 +148,10 @@ class BarcodeScannerPlatformView: NSObject, FlutterPlatformView, AVCaptureMetada
         }
     }
 
-    /// Limits detection to the scan area (centred, scannerWidth x scannerHeight), or to the
-    /// visible preview when no size is given, so codes cropped off by aspect fill are ignored.
-    /// Matches Android, which only accepts codes whose centre is inside the scan area.
+    /// Limits the search region to the scan area (centred, scannerWidth x scannerHeight), or to
+    /// the visible preview when no size is given, so codes cropped off by aspect fill are ignored.
+    /// rectOfInterest restricts where AVFoundation looks, so a code mostly outside the area may
+    /// not be read; Android instead accepts a code whose centre falls inside the area.
     private func updateRectOfInterest() {
         let layer = previewView.previewLayer
         let bounds = layer.bounds
@@ -183,14 +179,7 @@ class BarcodeScannerPlatformView: NSObject, FlutterPlatformView, AVCaptureMetada
             let value = barcode.stringValue
         else { return }
 
-        if let lastDetectionTime = lastDetectionTime,
-           Date().timeIntervalSince(lastDetectionTime) * 1000 < Double(delayMillis) {
-            return
-        }
-        lastDetectionTime = Date()
-        if !isContinuous {
-            isDetecting = false
-        }
+        // continuous and delayMillis are applied in Dart (BarcodeViewController) for both platforms.
         channel.invokeMethod("onBarcodeDetected", arguments: value)
     }
 
