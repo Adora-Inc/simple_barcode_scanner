@@ -61,6 +61,9 @@ class BarcodeScannerPlatformView: NSObject, FlutterPlatformView, AVCaptureMetada
         previewView = CameraPreviewView(frame: frame)
         previewView.backgroundColor = .black
         previewView.previewLayer.videoGravity = .resizeAspectFill
+        // Attached here, before sessionQueue touches the session: attaching later from main
+        // reconfigures the session and can race startRunning, which then throws.
+        previewView.previewLayer.session = captureSession
         channel = FlutterMethodChannel(
             name: "plugins.codingwithtashi/barcode_scanner_view_\(viewId)",
             binaryMessenger: messenger
@@ -173,10 +176,6 @@ class BarcodeScannerPlatformView: NSObject, FlutterPlatformView, AVCaptureMetada
             metadataOutput.setMetadataObjectsDelegate(self, queue: DispatchQueue.main)
             metadataOutput.metadataObjectTypes = self.metadataTypes.filter {
                 metadataOutput.availableMetadataObjectTypes.contains($0)
-            }
-
-            DispatchQueue.main.async {
-                self.previewView.previewLayer.session = self.captureSession
             }
             self.runSession()
         }
