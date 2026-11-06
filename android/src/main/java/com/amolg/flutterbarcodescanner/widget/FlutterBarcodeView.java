@@ -1,6 +1,8 @@
 package com.amolg.flutterbarcodescanner.widget;
 
+import android.Manifest;
 import android.content.Context;
+import android.content.pm.PackageManager;
 import android.hardware.Camera;
 import android.view.View;
 import android.util.Log;
@@ -18,9 +20,11 @@ import android.view.animation.TranslateAnimation;
 import android.widget.ImageView;
 import android.graphics.Color;
 import androidx.annotation.NonNull;
+import androidx.core.content.ContextCompat;
 
 import com.google.android.gms.vision.CameraSource;
 import com.google.android.gms.vision.Detector;
+import com.google.android.gms.vision.Frame;
 import com.google.android.gms.vision.barcode.Barcode;
 import com.google.android.gms.vision.barcode.BarcodeDetector;
 
@@ -31,6 +35,7 @@ import io.flutter.plugin.platform.PlatformView;
 
 import java.io.IOException;
 import java.lang.reflect.Field;
+import java.util.HashMap;
 import java.util.Map;
 
 public class FlutterBarcodeView implements PlatformView{
@@ -46,12 +51,16 @@ public class FlutterBarcodeView implements PlatformView{
     private BarcodeDetector barcodeDetector;
     private boolean isDetecting = true;
     private boolean isFlashOn = false;
+    // The camera starts once both are true, so an early onError reaches Dart's handler.
+    private boolean isSurfaceReady = false;
+    private boolean isStartRequested = false;
     private final Handler mainHandler;
 
     // Make scan area smaller than camera view
     /// 400, 200 for barcode
-    private static  int SCAN_AREA_WIDTH = 400;
-    private static  int SCAN_AREA_HEIGHT = 200;
+    /// Per-view, in physical px. Not static, so one view's size can't leak into the next.
+    private int SCAN_AREA_WIDTH = 400;
+    private int SCAN_AREA_HEIGHT = 200;
     private ParamData paramData;
 
     public FlutterBarcodeView(Context context, BinaryMessenger messenger, int id, Object creationParams) {
@@ -85,8 +94,13 @@ public class FlutterBarcodeView implements PlatformView{
                 5); // Height of the line
         frameLayout.addView(scanLine, lineParams);
 
-        // Start scanning animation
-        startScanLineAnimation();
+        if (paramData.isShowOverlay()) {
+            // Start scanning animation
+            startScanLineAnimation();
+        } else {
+            scannerOverlay.setVisibility(View.GONE);
+            scanLine.setVisibility(View.GONE);
+        }
 
         methodChannel = new MethodChannel(messenger, "plugins.codingwithtashi/barcode_scanner_view_" + id);
         methodChannel.setMethodCallHandler(this::onMethodCall);
@@ -97,8 +111,10 @@ public class FlutterBarcodeView implements PlatformView{
     }
 
     private void setDefaultData() {
-        SCAN_AREA_WIDTH = paramData.getScannerWidth()!=null?paramData.getScannerWidth():SCAN_AREA_WIDTH;
-        SCAN_AREA_HEIGHT = paramData.getScannerHeight()!=null?paramData.getScannerHeight():SCAN_AREA_HEIGHT;
+        // Dart sends logical px (dp); everything here (overlay, detection filter) works in physical px.
+        float density = context.getResources().getDisplayMetrics().density;
+        SCAN_AREA_WIDTH = paramData.getScannerWidth()!=null?Math.round(paramData.getScannerWidth() * density):SCAN_AREA_WIDTH;
+        SCAN_AREA_HEIGHT = paramData.getScannerHeight()!=null?Math.round(paramData.getScannerHeight() * density):SCAN_AREA_HEIGHT;
     }
 
     private int getScreenWidth() {
@@ -178,7 +194,7 @@ public class FlutterBarcodeView implements PlatformView{
 
     private void setupBarcodeDetector() {
         barcodeDetector = new BarcodeDetector.Builder(context)
-                .setBarcodeFormats(Barcode.ALL_FORMATS)
+                .setBarcodeFormats(getBarcodeFormats())
                 .build();
 
         barcodeDetector.setProcessor(new Detector.Processor<Barcode>() {
@@ -191,59 +207,61 @@ public class FlutterBarcodeView implements PlatformView{
                 final android.util.SparseArray<Barcode> barcodes = detections.getDetectedItems();
 
                 if (barcodes.size() > 0) {
-                    // Get the preview size from camera parameters
-                    Camera camera = getCamera();
-                    Camera.Parameters parameters = camera.getParameters();
-                    Camera.Size previewSize = parameters.getPreviewSize();
+                    Frame.Metadata frameMetadata = detections.getFrameMetadata();
+                    int rotation = frameMetadata.getRotation();
+                    boolean isRotated = rotation == Frame.ROTATION_90 || rotation == Frame.ROTATION_270;
+                    float frameWidth = isRotated ? frameMetadata.getHeight() : frameMetadata.getWidth();
+                    float frameHeight = isRotated ? frameMetadata.getWidth() : frameMetadata.getHeight();
+                    float scaleX = surfaceView.getWidth() / frameWidth;
+                    float scaleY = surfaceView.getHeight() / frameHeight;
 
-                    // Calculate scaling factors
-                    float scaleX = (float) surfaceView.getWidth() / previewSize.width;
-                    float scaleY = (float) surfaceView.getHeight() / previewSize.height;
-
-                    // Calculate scan area in normalized coordinates
-                    int scanAreaLeft = (surfaceView.getWidth() - SCAN_AREA_WIDTH) / 2;
-                    int scanAreaTop = (surfaceView.getHeight() - SCAN_AREA_HEIGHT) / 2;
-
-                    RectF scanArea = new RectF(
-                            scanAreaLeft,
-                            scanAreaTop,
-                            scanAreaLeft + SCAN_AREA_WIDTH,
-                            scanAreaTop + SCAN_AREA_HEIGHT
-                    );
+                    RectF scanArea;
+                    if (hasCustomScanArea() || paramData.isShowOverlay()) {
+                        int scanAreaLeft = (surfaceView.getWidth() - SCAN_AREA_WIDTH) / 2;
+                        int scanAreaTop = (surfaceView.getHeight() - SCAN_AREA_HEIGHT) / 2;
+                        scanArea = new RectF(
+                                scanAreaLeft,
+                                scanAreaTop,
+                                scanAreaLeft + SCAN_AREA_WIDTH,
+                                scanAreaTop + SCAN_AREA_HEIGHT
+                        );
+                    } else {
+                        // No size and no drawn box: scan the whole preview, as iOS does.
+                        scanArea = new RectF(0, 0, surfaceView.getWidth(), surfaceView.getHeight());
+                    }
 
                     for (int i = 0; i < barcodes.size(); i++) {
                         Barcode barcode = barcodes.valueAt(i);
+                        float centerX = barcode.getBoundingBox().exactCenterX() * scaleX;
+                        float centerY = barcode.getBoundingBox().exactCenterY() * scaleY;
 
-                        // Scale the barcode coordinates to match the preview view
-                        RectF scaledBarcodeRect = new RectF(
-                                barcode.getBoundingBox().left * scaleX,
-                                barcode.getBoundingBox().top * scaleY,
-                                barcode.getBoundingBox().right * scaleX,
-                                barcode.getBoundingBox().bottom * scaleY
-                        );
-
-                        // Check if the scaled barcode intersects with the scan area
-                        if (RectF.intersects(scanArea, scaledBarcodeRect)) {
-                            // Calculate overlap percentage
-                            RectF intersection = new RectF();
-                            intersection.setIntersect(scanArea, scaledBarcodeRect);
-                            float overlapArea = intersection.width() * intersection.height();
-                            float barcodeArea = scaledBarcodeRect.width() * scaledBarcodeRect.height();
-                            float overlapPercentage = (overlapArea / barcodeArea) * 100;
-                            System.out.println("Overlap percentage: " + overlapPercentage);
-                            // If more than 100% of the barcode is within the scan area
-                            if (overlapPercentage >= 100) {
-
-                                mainHandler.post(() ->
-                                        methodChannel.invokeMethod("onBarcodeDetected", barcode.rawValue)
-                                );
-                                return;
-                            }
+                        if (scanArea.contains(centerX, centerY)) {
+                            mainHandler.post(() ->
+                                    methodChannel.invokeMethod("onBarcodeDetected", barcode.rawValue)
+                            );
+                            return;
                         }
                     }
                 }
             }
         });
+    }
+
+    private boolean hasCustomScanArea() {
+        return paramData.getScannerWidth() != null && paramData.getScannerHeight() != null;
+    }
+
+    /// Mirrors the iOS format lists in SwiftFlutterBarcodeScannerPlugin.
+    private int getBarcodeFormats() {
+        String scanFormat = paramData.getScanFormat();
+        if ("ONLY_QR_CODE".equals(scanFormat)) {
+            return Barcode.QR_CODE;
+        }
+        if ("ONLY_BARCODE".equals(scanFormat)) {
+            return Barcode.CODE_128 | Barcode.CODE_39 | Barcode.CODE_93 | Barcode.EAN_13
+                    | Barcode.EAN_8 | Barcode.ITF | Barcode.PDF417 | Barcode.UPC_A | Barcode.UPC_E;
+        }
+        return Barcode.ALL_FORMATS;
     }
 
     @Override
@@ -261,11 +279,8 @@ public class FlutterBarcodeView implements PlatformView{
         surfaceView.getHolder().addCallback(new SurfaceHolder.Callback() {
             @Override
             public void surfaceCreated(SurfaceHolder holder) {
-                try {
-                    cameraSource.start(surfaceView.getHolder());
-                } catch (IOException e) {
-                    Log.e(TAG, "Error starting camera: " + e.getMessage());
-                }
+                isSurfaceReady = true;
+                startCameraIfReady();
             }
 
             @Override
@@ -273,9 +288,37 @@ public class FlutterBarcodeView implements PlatformView{
 
             @Override
             public void surfaceDestroyed(SurfaceHolder holder) {
-                cameraSource.stop();
+                isSurfaceReady = false;
+                if (cameraSource != null) {
+                    cameraSource.stop();
+                }
             }
         });
+    }
+
+    private void startCameraIfReady() {
+        if (!isSurfaceReady || !isStartRequested || cameraSource == null) return;
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA)
+                != PackageManager.PERMISSION_GRANTED) {
+            sendError("PERMISSION_DENIED", "Camera permission denied");
+            return;
+        }
+        try {
+            cameraSource.start(surfaceView.getHolder());
+        } catch (SecurityException e) {
+            Log.e(TAG, "Camera permission denied: " + e.getMessage());
+            sendError("PERMISSION_DENIED", "Camera permission denied");
+        } catch (IOException | RuntimeException e) {
+            Log.e(TAG, "Error starting camera: " + e.getMessage());
+            sendError("CAMERA_UNAVAILABLE", "Camera not available");
+        }
+    }
+
+    private void sendError(String code, String message) {
+        Map<String, String> args = new HashMap<>();
+        args.put("code", code);
+        args.put("message", message);
+        mainHandler.post(() -> methodChannel.invokeMethod("onError", args));
     }
 
     private Camera getCamera() {
@@ -329,6 +372,11 @@ public class FlutterBarcodeView implements PlatformView{
                 break;
             case "toggleFlash":
                 toggleFlash(result);
+                break;
+            case "startScanning":
+                isStartRequested = true;
+                startCameraIfReady();
+                result.success(null);
                 break;
             default:
                 result.notImplemented();
