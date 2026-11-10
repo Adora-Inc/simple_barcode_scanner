@@ -11,9 +11,11 @@ public class ParamData {
     private final Boolean continuous;
     private final Integer scannerWidth;
     private final Integer scannerHeight;
+    private final Boolean showOverlay;
+    private final String scanFormat;
 
     // Constructor
-    public ParamData(String key, Integer scanType, Integer cameraFace, Long delayMillis, Boolean continuous, Integer scannerWidth, Integer scannerHeight) {
+    public ParamData(String key, Integer scanType, Integer cameraFace, Long delayMillis, Boolean continuous, Integer scannerWidth, Integer scannerHeight, Boolean showOverlay, String scanFormat) {
         this.key = key;
         this.scanType = scanType;
         this.cameraFace = cameraFace;
@@ -21,6 +23,8 @@ public class ParamData {
         this.continuous = continuous;
         this.scannerWidth = scannerWidth;
         this.scannerHeight = scannerHeight;
+        this.showOverlay = showOverlay;
+        this.scanFormat = scanFormat;
     }
 
     // Getters
@@ -52,6 +56,14 @@ public class ParamData {
         return scannerHeight;
     }
 
+    public boolean isShowOverlay() {
+        return showOverlay == null || showOverlay;
+    }
+
+    public String getScanFormat() {
+        return scanFormat;
+    }
+
     // Helper method to safely convert Number to Long
     private static Long getLongFromObject(Object obj) {
         if (obj == null) {
@@ -78,6 +90,8 @@ public class ParamData {
         Boolean continuous = (Boolean) map.get("continuous");
         Integer scannerWidth = (Integer) map.get("scannerWidth");
         Integer scannerHeight = (Integer) map.get("scannerHeight");
-        return new ParamData(key, scanType, cameraFace, delayMillis, continuous, scannerWidth, scannerHeight);
+        Boolean showOverlay = (Boolean) map.get("showOverlay");
+        String scanFormat = (String) map.get("scanFormat");
+        return new ParamData(key, scanType, cameraFace, delayMillis, continuous, scannerWidth, scannerHeight, showOverlay, scanFormat);
     }
 }

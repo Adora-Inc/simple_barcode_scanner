@@ -1,3 +1,10 @@
+## Unreleased
+* **Breaking:** `scaleWidth` / `scaleHeight` (`scannerWidth` / `scannerHeight`) are now logical pixels on Android and iOS. Remove any `* devicePixelRatio` you applied before passing them.
+* Added an embedded iOS scanner view (`BarcodeScannerView` / `SimpleBarcodeScanner` widget).
+* Added `showOverlay` to hide the native scan box and draw your own.
+* Added `onError(code, message)` with codes `PERMISSION_DENIED` and `CAMERA_UNAVAILABLE`.
+* `continuous`, `delayMillis` and `scanFormat` now behave the same on Android and iOS in the embedded view.
+
 ## 0.6.0
 * Fixed [Issue #108](https://github.com/CodingWithTashi/simple_barcode_scanner/issues/108) - Integer/Long ClassCastException on Android
 * Fixed [Issue #105](https://github.com/CodingWithTashi/simple_barcode_scanner/issues/105) - iOS buttons overlapped by system UI (safe area support)
