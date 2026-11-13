@@ -47,6 +47,15 @@ let ONLY_BARCODE = [
   AVMetadataObject.ObjectType.upce];
 
 public class SwiftFlutterBarcodeScannerPlugin: NSObject, FlutterPlugin, ScanBarcodeDelegate,FlutterStreamHandler {
+    /// The images ship in the SwiftPM resource bundle, or in the plugin framework under CocoaPods.
+    static var resourceBundle: Bundle {
+        #if SWIFT_PACKAGE
+        return Bundle.module
+        #else
+        return Bundle(for: SwiftFlutterBarcodeScannerPlugin.self)
+        #endif
+    }
+
 
     public static var lineColor:String=""
     public static var cancelButtonText:String=""
@@ -275,7 +284,7 @@ class BarcodeScannerViewController: UIViewController {
         flashButton.setTitle("Flash",for:.normal)
         flashButton.translatesAutoresizingMaskIntoConstraints=false
         
-        flashButton.setImage(UIImage(named: "ic_flash_off", in: Bundle(for: SwiftFlutterBarcodeScannerPlugin.self), compatibleWith: nil),for:.normal)
+        flashButton.setImage(UIImage(named: "ic_flash_off", in: SwiftFlutterBarcodeScannerPlugin.resourceBundle, compatibleWith: nil),for:.normal)
         
         flashButton.addTarget(self, action: #selector(BarcodeScannerViewController.flashButtonClicked), for: .touchUpInside)
         return flashButton
@@ -286,7 +295,7 @@ class BarcodeScannerViewController: UIViewController {
         let button = UIButton()
         
         button.translatesAutoresizingMaskIntoConstraints = false
-        button.setImage(UIImage(named: "ic_switch_camera", in: Bundle(for: SwiftFlutterBarcodeScannerPlugin.self), compatibleWith: nil),for: .normal)
+        button.setImage(UIImage(named: "ic_switch_camera", in: SwiftFlutterBarcodeScannerPlugin.resourceBundle, compatibleWith: nil),for: .normal)
         button.addTarget(self, action: #selector(BarcodeScannerViewController.switchCameraButtonClicked), for: .touchUpInside)
         
         return button
@@ -480,11 +489,11 @@ class BarcodeScannerViewController: UIViewController {
     }
     
     private func flashIconOff() {
-        flashIcon.setImage(UIImage(named: "ic_flash_off", in: Bundle(for: SwiftFlutterBarcodeScannerPlugin.self), compatibleWith: nil),for:.normal)
+        flashIcon.setImage(UIImage(named: "ic_flash_off", in: SwiftFlutterBarcodeScannerPlugin.resourceBundle, compatibleWith: nil),for:.normal)
     }
     
     private func flashIconOn() {
-        flashIcon.setImage(UIImage(named: "ic_flash_on", in: Bundle(for: SwiftFlutterBarcodeScannerPlugin.self), compatibleWith: nil),for:.normal)
+        flashIcon.setImage(UIImage(named: "ic_flash_on", in: SwiftFlutterBarcodeScannerPlugin.resourceBundle, compatibleWith: nil),for:.normal)
     }
     
     private func setFlashStatus(device: AVCaptureDevice, mode: AVCaptureDevice.TorchMode) {
